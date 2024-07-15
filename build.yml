@@ -1,5 +1,5 @@
 
-name: main
+name:build
 
 on:
   workflow_dispatch:
@@ -22,7 +22,7 @@ jobs:
 
     steps:
     - name: 检查项目分支
-      uses: actions/checkout@main
+      uses: actions/checkout@v2
 
     - name: 安装编译环境
       env:
@@ -102,7 +102,7 @@ jobs:
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
         
     - name: 上传固件到github
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v2
       with:
         name: immortalwrt${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
