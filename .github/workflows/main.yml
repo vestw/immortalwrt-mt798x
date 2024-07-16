@@ -1,0 +1,90 @@
+name: build
+
+on:
+  workflow_dispatch:
+    inputs:
+      manual:
+        description: '手动触发一次编译'
+
+env:
+  REPO_URL: https://github.com/hanwckf/immortalwrt-mt798x
+  REPO_BRANCH: openwrt-21.02
+  CONFIG_FILE: mt3.config
+  DIY_P1_SH: diy1.sh
+  DIY_P2_SH: diy-part4.sh
+  UPLOAD_FIRMWARE: true
+  TZ: Asia/Shanghai
+
+jobs:
+build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: 检查项目分支
+      uses: actions/checkout@v2  # 使用 v2 版本
+
+    - name: 安装编译环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y build-essential clang flex g++ gawk gcc-multilib gettext \
+        git libncurses5-dev libssl-dev python3-distutils python3-pyelftools python3-setuptools \
+        libpython3-dev rsync unzip zlib1g-dev swig aria2 jq subversion qemu-utils ccache rename \
+        libelf-dev device-tree-compiler libgnutls28-dev coccinelle libgmp3-dev libmpc-dev
+        sudo apt-get autoremove --purge -y
+        sudo apt-get clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo mkdir -p /workdir
+        sudo chown $USER:$USER /workdir  # 更改为当前用户
+
+    - name: 下载固件源码
+      working-directory: /workdir
+      run: |
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        
+    - name: 安装并更新插件
+      working-directory: ./openwrt
+      run: |
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+        name: 加载.config
+      run: |        
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/.config
+        
+    - name: 更改设置（DIY2）
+      run: |
+        chmod +x $DIY_P2_SH
+        cd openwrt
+        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: 下载依赖
+      working-directory: ./openwrt
+      run: |
+        make defconfig
+        make download -j$(nproc)
+         make defconfig
+        make download -j$(nproc)
+
+    - name: 开始编译固件
+      working-directory: ./openwrt
+      run: |
+        echo -e "$(nproc) thread build."
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        
+    - name: 整理固件
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf packages feeds.buildinfo version.buildinfo *kernel.bin profiles.json *rootfs.img *.manifest sha256sums
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        
+        name: 上传固件到 GitHub
+      uses: actions/upload-artifact@v2  # 使用 v2 版本
+      with:
+        name: immortalwrt${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
